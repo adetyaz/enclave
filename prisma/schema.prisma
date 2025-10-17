@@ -1,0 +1,132 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(cuid())
+  walletAddress String   @unique @map("wallet_address")
+  userType      UserType @map("user_type")
+  displayName   String?  @map("display_name")
+  email         String?
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  lastActive    DateTime @default(now()) @map("last_active")
+  isActive      Boolean  @default(true) @map("is_active")
+
+  // Relations
+  creatorProfile CreatorProfile?
+  subscriptions  Subscription[]
+  contentItems   ContentItem[]
+  tiers          SubscriptionTier[]
+
+  @@map("users")
+}
+
+model CreatorProfile {
+  id                String   @id @default(cuid())
+  userId            String   @unique @map("user_id")
+  walletAddress     String   @unique @map("wallet_address") // Used for Moca credential verification
+  displayName       String   @map("display_name") // What shows in discovery feeds (real name or username)
+  displayPreference String   @default("username") @map("display_preference") // 'username' or 'realname'
+  about             String?  // Creator bio/description
+  contentType       String   @map("content_type") // 'video', 'audio', 'image', 'mixed'
+  supportedAges     String[] @map("supported_ages") // ['18+', '21+', 'all-ages']
+  imageIpfs         String?  @map("image_ipfs") // Profile image IPFS hash from Pinata
+  socialLinks       Json     @default("{}") @map("social_links")
+  verificationStatus String  @default("unverified") @map("verification_status")
+  mocaCredentialId  String?  @map("moca_credential_id") // Reference to Moca credential
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("creator_profiles")
+}
+
+model SubscriptionTier {
+  id          String   @id @default(cuid())
+  creatorId   String   @map("creator_id")
+  name        String
+  description String?
+  priceMoca   Decimal  @map("price_moca") @db.Decimal(18, 8)
+  accessRules Json     @map("access_rules") // ZK credential requirements
+  tierLevel   Int      @default(1) @map("tier_level")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  creator      User           @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  subscriptions Subscription[]
+  contentItems ContentItem[]
+
+  @@map("subscription_tiers")
+}
+
+model ContentItem {
+  id                   String   @id @default(cuid())
+  creatorId            String   @map("creator_id")
+  tierId               String?  @map("tier_id")
+  title                String
+  description          String?
+  contentType          String   @map("content_type")
+  ipfsHash             String   @map("ipfs_hash")
+  thumbnailIpfs        String?  @map("thumbnail_ipfs")
+  fileSize             BigInt?  @map("file_size")
+  duration             Int?     // Duration in seconds for video/audio
+  tags                 String[]
+  allowedCountries     String[] @map("allowed_countries")
+  restrictedCountries  String[] @map("restricted_countries")
+  isPublic             Boolean  @default(false) @map("is_public")
+  viewCount            Int      @default(0) @map("view_count")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  creator User             @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  tier    SubscriptionTier? @relation(fields: [tierId], references: [id])
+
+  @@map("content_items")
+}
+
+model Subscription {
+  id              String            @id @default(cuid())
+  fanId           String            @map("fan_id")
+  creatorId       String            @map("creator_id")
+  tierId          String            @map("tier_id")
+  status          SubscriptionStatus @default(ACTIVE)
+  transactionHash String?           @map("transaction_hash")
+  startedAt       DateTime          @default(now()) @map("started_at")
+  expiresAt       DateTime?         @map("expires_at")
+  createdAt       DateTime          @default(now()) @map("created_at")
+
+  // Relations
+  fan     User             @relation(fields: [fanId], references: [id], onDelete: Cascade)
+  tier    SubscriptionTier @relation(fields: [tierId], references: [id])
+
+  @@unique([fanId, creatorId])
+  @@map("subscriptions")
+}
+
+enum UserType {
+  CREATOR
+  FAN
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
