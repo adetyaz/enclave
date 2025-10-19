@@ -1,52 +1,150 @@
 # Enclave Implementation Guide
 
+**Version:** 2.0  
+**Last Updated:** October 19, 2025  
+**Status:** Active Development
+
 ## Overview
 
-This document outlines all the implementations required for the Enclave privacy-first creator platform, detailing the specific Moca SDK tools, implementation locations, reasons for each implementation, and expected interactions.
+This document provides a comprehensive implementation guide for the Enclave data monetization marketplace, detailing specific Moca SDK integrations, smart contract implementations, and feature development across all platform components.
+
+## Technology Stack
+
+### Frontend
+
+- **Framework**: SvelteKit 5 (TypeScript)
+- **Styling**: TailwindCSS
+- **Icons**: Lucide Svelte
+- **State Management**: Svelte stores
+
+### Blockchain
+
+- **Network**: Moca Chain
+- **Smart Contracts**: Solidity ^0.8.20
+- **Development**: Hardhat
+- **Testing**: Hardhat + Chai
+
+### Moca Network Integration
+
+- **AIR Account SDK**: Authentication & wallet management
+- **AIR Credential SDK**: ZK credential issuance & verification
+- **zkTLS**: Zero-knowledge proof generation
+
+---
 
 ## Implementation Categories
 
-### 1. Authentication & Identity Management
-
-### 2. Credential Issuance & Verification
-
-### 3. Payment Processing
-
-### 4. Content Access Control
-
-### 5. Smart Contract Integration
-
-### 6. Ecosystem Integration
-
-### 7. Data Storage & Analytics
+1. [Authentication & Identity](#1-authentication--identity-management)
+2. [Credential System](#2-credential-system)
+3. [Marketplace](#3-marketplace-implementation)
+4. [Trust System](#4-trust-system-vouching--slashing)
+5. [Smart Contracts](#5-smart-contract-implementation)
+6. [UI/UX Components](#6-uiux-components)
+7. [Testing & Deployment](#7-testing--deployment)
 
 ---
 
 ## 1. Authentication & Identity Management
 
-### 1.1 Moca Login Integration (AIR Account Services)
+### 1.1 Moca SSO Integration (AIR Account Services)
 
-**Implementation:** Universal Web3 SSO for creators and fans
+**Purpose:** Web3 wallet-based authentication for all users
 
-**Moca SDK Tool:** `@mocanetwork/airkit` - Account Services
+**Moca SDK Tool:** `@moca/air-account-sdk`
 
-- **Primary Method:** `authenticate()`
-- **Secondary Methods:** `getUserProfile()`, `getWallet()`, `signOut()`
+**Key Methods:**
+
+- `authenticate()` - Connect wallet and authenticate
+- `disconnect()` - Sign out user
+- `isConnected()` - Check authentication status
+- `getWalletAddress()` - Get user's wallet address
 
 **Implementation Location:**
 
-- **Frontend:** `src/lib/components/MocaLogin.svelte`
-- **Backend:** `src/routes/auth/+page.server.ts`
-- **Store:** `src/lib/stores/auth.ts`
+```
+src/lib/services/
+├── mocaAuth.ts              # Authentication service
+└── useAirKit.ts             # AIR Kit wrapper
+
+src/routes/
+├── auth/
+│   └── +page.svelte         # Login page
+└── +layout.svelte           # Auth check wrapper
+```
+
+**Code Implementation:**
+
+```typescript
+// src/lib/services/mocaAuth.ts
+import { AIRAccountSDK } from '@moca/air-account-sdk';
+import { writable } from 'svelte/store';
+
+class MocaAuthService {
+	private sdk: AIRAccountSDK;
+	public user = writable<{ address: string } | null>(null);
+
+	constructor() {
+		this.sdk = new AIRAccountSDK({
+			partnerId: import.meta.env.PUBLIC_PARTNERID,
+			environment: 'staging'
+		});
+	}
+
+	async login(): Promise<string> {
+		try {
+			const { walletAddress } = await this.sdk.authenticate();
+			this.user.set({ address: walletAddress });
+			return walletAddress;
+		} catch (error) {
+			console.error('Login failed:', error);
+			throw error;
+		}
+	}
+
+	async logout(): Promise<void> {
+		await this.sdk.disconnect();
+		this.user.set(null);
+	}
+
+	isAuthenticated(): boolean {
+		return this.sdk.isConnected();
+	}
+}
+
+export const mocaAuth = new MocaAuthService();
+```
 
 **Reason:**
 
-- Eliminate need for traditional username/password registration
-- Provide seamless cross-platform identity across Animoca ecosystem
-- Enable wallet-based authentication for $MOCA payments
-- Reduce onboarding friction for both creators and fans
+- No password management required
+- Seamless integration with Moca ecosystem
+- Secure wallet-based authentication
+- Cross-platform identity
 
-**Interactions:**
+**User Interactions:**
+
+1. User clicks "Connect Wallet"
+2. Moca wallet prompt appears
+3. User approves connection
+4. User authenticated, redirected to dashboard
+
+---
+
+## 2. Credential System
+
+### 2.1 Credential Issuance with zkTLS
+
+**Purpose:** Create Zero-Knowledge credentials from user data
+
+**Moca SDK Tool:** `@moca/air-credential-sdk`
+
+**Key Methods:**
+
+- `issueCredential()` - Issue new credential
+- `verifyCredential()` - Verify credential validity
+- `revokeCredential()` - Revoke credential
+
+**Implementation Location:**
 
 ```mermaid
 sequenceDiagram

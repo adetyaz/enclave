@@ -1,16 +1,26 @@
 # Enclave Storage Architecture Plan
 
+**Version 2.0 | Last Updated: October 19, 2025**
+
 ## Overview
 
-This document outlines the comprehensive storage strategy for the Enclave privacy-first creator platform, detailing the hybrid approach combining traditional databases with decentralized storage solutions.
+This document outlines the comprehensive storage strategy for Enclave, a privacy-first data monetization marketplace where users generate Zero-Knowledge (ZK) credentials from their personal data and sell them to data buyers while maintaining complete privacy.
 
 ## Storage Architecture Decision
 
 **Enclave uses a HYBRID STORAGE ARCHITECTURE:**
 
-1. **PostgreSQL Database** - Operational data, fast queries, user sessions
-2. **IPFS/Moca Chain Storage (MCSP)** - Content files, credentials, immutable records
-3. **Smart Contracts (Moca Chain)** - Payments, subscriptions, access control
+1. **PostgreSQL Database** - Operational data, marketplace listings, user sessions, transaction history
+2. **On-Chain Storage (Moca Chain)** - Credential hashes, marketplace contracts, governance data, trust scores
+3. **IPFS/Arweave** - ZK proofs, credential metadata, encrypted data packages
+4. **Smart Contracts** - Credential registry, marketplace logic, payments, vouching/slashing
+
+## Core Storage Principles
+
+1. **Privacy-First**: No raw PII stored; only ZK credential hashes and proofs
+2. **Decentralization**: Critical data on-chain or IPFS; database for fast queries only
+3. **Immutability**: Credential proofs and transactions permanently stored
+4. **Scalability**: Layered architecture with off-chain indexing for performance
 
 ## Storage Components
 
@@ -18,134 +28,138 @@ This document outlines the comprehensive storage strategy for the Enclave privac
 
 #### Purpose
 
-Fast, relational storage for operational data requiring complex queries and frequent updates.
+Fast, relational storage for operational data requiring complex queries, marketplace listings, and user interfaces.
 
 #### Technology Stack
 
 - **Database:** PostgreSQL 15+
 - **ORM:** Prisma
 - **Hosting:** Railway/Supabase/Vercel Postgres
-- **Backup:** Automated daily backups with point-in-time recovery
+- **Backup:** Automated daily backups + transaction log archiving
 
 #### Data Categories
 
 **User Management:**
 
-- User sessions and authentication tokens
-- User preferences and settings
+- Moca wallet addresses (no PII)
+- User preferences and UI settings
+- Session tokens (JWT with 24h expiry)
 - Login history and security logs
 
-**Creator Operations:**
+**Marketplace Operations:**
 
-- Creator profiles and bio information
-- Subscription tier configurations
-- Content metadata (titles, descriptions, pricing)
-- Dashboard settings and customizations
+- Credential listing metadata (type, price, description)
+- Purchase history (buyer-seller mapping)
+- Search indexes for credential discovery
+- Category and tag management
+
+**Trust System:**
+
+- Vouching relationships (on-chain hash + off-chain cache)
+- Slashing events and dispute logs
+- Reputation score cache (derived from on-chain data)
+- Trust network graph (adjacency lists)
 
 **Platform Analytics:**
 
-- Aggregated usage statistics (no PII)
-- Content performance metrics
-- Revenue analytics and reporting
-- Platform health monitoring data
-
-**Transactional Data:**
-
-- Payment transaction logs
-- Subscription status tracking
-- Platform configuration data
-- Audit logs for compliance
+- Aggregated marketplace metrics (no PII)
+- Credential type popularity trends
+- Revenue analytics (in $MOCA tokens)
+- Network health monitoring
 
 #### Database Schema
 
 ```sql
--- User management
+-- User management (wallet-based identity)
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     wallet_address VARCHAR(42) UNIQUE NOT NULL,
-    user_type VARCHAR(20) NOT NULL CHECK (user_type IN ('creator', 'fan')),
     display_name VARCHAR(100),
-    email VARCHAR(255),
+    avatar_url TEXT,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
     last_active TIMESTAMP DEFAULT NOW(),
-    is_active BOOLEAN DEFAULT true
-);
-
--- Creator profiles (metadata in database - fans will have different structure)
-CREATE TABLE creator_profiles (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    wallet_address VARCHAR(42) UNIQUE NOT NULL, -- Used for Moca credential verification
-    about TEXT, -- Creator bio/description
-    content_type VARCHAR(50) NOT NULL, -- Primary content type: 'video', 'audio', 'image', 'mixed'
-    supported_ages TEXT[] NOT NULL, -- Age groups they create for: ['18+', '21+', 'all-ages']
-    image_ipfs VARCHAR(64), -- Profile image stored on IPFS via Pinata
-    social_links JSONB DEFAULT '{}',
-    verification_status VARCHAR(20) DEFAULT 'unverified',
-    moca_credential_id VARCHAR(100), -- Reference to Moca credential for verification
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
-);
-
--- NOTE: Fan profiles will have different schema structure with different fields
-
--- Subscription tiers
-CREATE TABLE subscription_tiers (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    creator_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    name VARCHAR(100) NOT NULL,
-    description TEXT,
-    price_moca DECIMAL(18,8) NOT NULL,
-    access_rules JSONB NOT NULL, -- ZK credential requirements
-    tier_level INTEGER DEFAULT 1,
     is_active BOOLEAN DEFAULT true,
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
+    reputation_score INTEGER DEFAULT 0, -- Cache of on-chain reputation
+    total_vouches INTEGER DEFAULT 0,
+    total_slashes INTEGER DEFAULT 0
 );
 
--- Content metadata (not actual content files)
-CREATE TABLE content_items (
+-- Credential listings (marketplace inventory)
+CREATE TABLE credential_listings (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    creator_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    tier_id UUID REFERENCES subscription_tiers(id),
+    seller_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    credential_type VARCHAR(50) NOT NULL, -- 'education', 'employment', 'financial', 'identity', 'health'
     title VARCHAR(200) NOT NULL,
     description TEXT,
-    content_type VARCHAR(50) NOT NULL, -- 'video', 'image', 'audio', 'nft'
-    ipfs_hash VARCHAR(64) NOT NULL, -- Reference to IPFS content
-    thumbnail_ipfs VARCHAR(64), -- IPFS hash for thumbnail
-    file_size BIGINT, -- Size in bytes
-    duration INTEGER, -- For video/audio content in seconds
-    tags TEXT[],
-    allowed_countries TEXT[], -- Array of ISO country codes for geographic restrictions
-    restricted_countries TEXT[], -- Array of ISO country codes to block
-    is_public BOOLEAN DEFAULT false,
+    price_moca DECIMAL(18,8) NOT NULL,
+    credential_hash VARCHAR(66) NOT NULL, -- Keccak256 hash of ZK proof (references on-chain)
+    ipfs_cid VARCHAR(64), -- IPFS CID for ZK proof data
+    metadata JSONB DEFAULT '{}', -- Tags, categories, attributes
+    status VARCHAR(20) DEFAULT 'active', -- 'active', 'sold', 'removed', 'disputed'
+    purchase_count INTEGER DEFAULT 0,
     view_count INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
--- Subscription tracking
-CREATE TABLE subscriptions (
+-- Purchase transactions (marketplace history)
+CREATE TABLE purchases (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    fan_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    creator_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    tier_id UUID REFERENCES subscription_tiers(id),
-    status VARCHAR(20) DEFAULT 'active', -- 'active', 'expired', 'cancelled'
-    transaction_hash VARCHAR(66), -- Blockchain transaction hash
-    started_at TIMESTAMP DEFAULT NOW(),
-    expires_at TIMESTAMP,
-    created_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE(fan_id, creator_id) -- One subscription per fan-creator pair
+    listing_id UUID REFERENCES credential_listings(id),
+    buyer_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    seller_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    price_moca DECIMAL(18,8) NOT NULL,
+    tx_hash VARCHAR(66) NOT NULL, -- Moca Chain transaction hash
+    credential_hash VARCHAR(66) NOT NULL,
+    access_key_encrypted TEXT, -- Encrypted ZK proof access key
+    status VARCHAR(20) DEFAULT 'completed', -- 'completed', 'disputed', 'refunded'
+    created_at TIMESTAMP DEFAULT NOW()
 );
 
--- Analytics (aggregated, anonymized data)
-CREATE TABLE analytics_events (
+-- Vouching relationships (trust network cache)
+CREATE TABLE vouches (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    event_type VARCHAR(50) NOT NULL,
-    creator_id UUID REFERENCES users(id),
-    content_id UUID REFERENCES content_items(id),
-    tier_id UUID REFERENCES subscription_tiers(id),
+    voucher_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    vouchee_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    stake_amount DECIMAL(18,8) NOT NULL, -- $MOCA staked
+    tx_hash VARCHAR(66) NOT NULL, -- On-chain vouching transaction
+    status VARCHAR(20) DEFAULT 'active', -- 'active', 'slashed', 'withdrawn'
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(voucher_id, vouchee_id)
+);
+
+-- Slashing events (trust system enforcement)
+CREATE TABLE slashing_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    slashed_user_id UUID REFERENCES users(id),
+    voucher_id UUID REFERENCES users(id),
+    reason TEXT NOT NULL,
+    evidence_ipfs VARCHAR(64), -- IPFS CID for evidence
+    slashed_amount DECIMAL(18,8) NOT NULL,
+    tx_hash VARCHAR(66) NOT NULL,
+    governance_vote_id INTEGER, -- Reference to on-chain governance proposal
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Credential types (schema definitions)
+CREATE TABLE credential_schemas (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    type_name VARCHAR(50) UNIQUE NOT NULL,
+    description TEXT,
+    json_schema JSONB NOT NULL, -- JSON Schema for credential structure
+    zkp_circuit_cid VARCHAR(64), -- IPFS CID for zk-SNARK circuit
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Analytics (aggregated, privacy-preserving)
+CREATE TABLE marketplace_analytics (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    metric_type VARCHAR(50) NOT NULL, -- 'listing_created', 'purchase', 'vouch', 'slash'
+    credential_type VARCHAR(50),
     count INTEGER DEFAULT 1,
     revenue_moca DECIMAL(18,8),
     date DATE NOT NULL DEFAULT CURRENT_DATE,
@@ -162,15 +176,14 @@ CREATE TABLE platform_config (
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
--- Audit logs
+-- Audit logs (security and compliance)
 CREATE TABLE audit_logs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID REFERENCES users(id),
-    action VARCHAR(100) NOT NULL,
+    action VARCHAR(100) NOT NULL, -- 'credential_created', 'purchase', 'vouch', 'slash'
     resource_type VARCHAR(50),
     resource_id UUID,
-    old_values JSONB,
-    new_values JSONB,
+    tx_hash VARCHAR(66), -- Link to blockchain transaction if applicable
     ip_address INET,
     user_agent TEXT,
     created_at TIMESTAMP DEFAULT NOW()
@@ -182,61 +195,186 @@ CREATE TABLE audit_logs (
 ```sql
 -- Indexes for optimal query performance
 CREATE INDEX idx_users_wallet_address ON users(wallet_address);
-CREATE INDEX idx_users_active ON users(is_active, last_active);
-CREATE INDEX idx_content_creator_tier ON content_items(creator_id, tier_id);
-CREATE INDEX idx_content_type_public ON content_items(content_type, is_public);
-CREATE INDEX idx_subscriptions_fan_creator ON subscriptions(fan_id, creator_id);
-CREATE INDEX idx_subscriptions_status ON subscriptions(status, expires_at);
-CREATE INDEX idx_analytics_date_creator ON analytics_events(date, creator_id);
-CREATE INDEX idx_analytics_event_type ON analytics_events(event_type, date);
+CREATE INDEX idx_users_reputation ON users(reputation_score DESC, is_active);
+CREATE INDEX idx_listings_seller_type ON credential_listings(seller_id, credential_type);
+CREATE INDEX idx_listings_status_price ON credential_listings(status, price_moca);
+CREATE INDEX idx_listings_type_created ON credential_listings(credential_type, created_at DESC);
+CREATE INDEX idx_purchases_buyer_seller ON purchases(buyer_id, seller_id);
+CREATE INDEX idx_purchases_tx_hash ON purchases(tx_hash);
+CREATE INDEX idx_vouches_vouchee ON vouches(vouchee_id, status);
+CREATE INDEX idx_slashing_user_date ON slashing_events(slashed_user_id, created_at);
+CREATE INDEX idx_analytics_metric_date ON marketplace_analytics(metric_type, date);
+
+-- Full-text search for credential discovery
+CREATE INDEX idx_listings_search ON credential_listings USING gin(to_tsvector('english', title || ' ' || description));
 ```
 
-### 2. IPFS/Moca Chain Storage (MCSP Network)
+### 2. On-Chain Storage (Moca Chain)
 
 #### Purpose
 
-Decentralized, immutable storage for content files and sensitive records.
+Immutable, trustless storage for critical marketplace data, credential hashes, and governance.
 
 #### Technology Stack
 
-- **Pinata:** Primary IPFS pinning service with enterprise reliability
-- **IPFS:** Content addressing and distributed storage
-- **Moca Chain Storage Provider Network (MCSP):** Secondary backup and Moca integration
-- **CDN Integration:** Fast global content delivery via Pinata Gateway
+- **Blockchain:** Moca Chain (EVM-compatible)
+- **Smart Contracts:** Solidity ^0.8.20
+- **Deployment:** Hardhat with verify plugin
+- **Indexing:** The Graph protocol for fast queries
 
 #### Data Categories
 
-**Content Files:**
+**Credential Registry:**
 
-- Video files (encrypted for gated content with geographic metadata)
-- Image files (profile pictures, banners, NFTs)
-- Audio files and podcasts
-- Document files (PDFs, etc.)
-- NFT metadata and assets
-- Geographic content restrictions metadata
+- Credential hashes (keccak256 of ZK proofs)
+- Issuer addresses (wallet addresses)
+- Creation timestamps (block.timestamp)
+- Revocation status (boolean flag)
+
+**Marketplace Transactions:**
+
+- Listing creation events (ListingCreated)
+- Purchase events (CredentialPurchased)
+- Price history (PriceUpdated events)
+- Royalty payments (RoyaltyPaid events)
+
+**Trust System:**
+
+- Vouching stakes (Vouched events)
+- Slashing penalties (Slashed events)
+- Reputation scores (ReputationUpdated)
+- Trust graph edges (VoucherAdded/Removed)
+
+**Governance:**
+
+- Proposal submissions (ProposalCreated)
+- Voting records (Voted events)
+- Execution results (ProposalExecuted)
+- Parameter updates (ParameterChanged)
+
+#### Smart Contract Architecture
+
+**CredentialRegistry.sol** (93 lines)
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "@openzeppelin/contracts/access/AccessControl.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+
+contract CredentialRegistry is AccessControl, ReentrancyGuard {
+    bytes32 public constant ISSUER_ROLE = keccak256("ISSUER_ROLE");
+
+    struct Credential {
+        bytes32 credentialHash; // keccak256 of ZK proof
+        address issuer;
+        uint256 timestamp;
+        bool revoked;
+        string ipfsCid; // IPFS CID for ZK proof data
+    }
+
+    mapping(bytes32 => Credential) public credentials;
+    mapping(address => bytes32[]) public userCredentials;
+
+    event CredentialIssued(bytes32 indexed credentialHash, address indexed issuer, string ipfsCid);
+    event CredentialRevoked(bytes32 indexed credentialHash, address indexed issuer);
+
+    constructor() {
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+    }
+
+    function issueCredential(
+        bytes32 credentialHash,
+        string memory ipfsCid
+    ) external onlyRole(ISSUER_ROLE) nonReentrant {
+        require(credentials[credentialHash].issuer == address(0), "Credential already exists");
+
+        credentials[credentialHash] = Credential({
+            credentialHash: credentialHash,
+            issuer: msg.sender,
+            timestamp: block.timestamp,
+            revoked: false,
+            ipfsCid: ipfsCid
+        });
+
+        userCredentials[msg.sender].push(credentialHash);
+
+        emit CredentialIssued(credentialHash, msg.sender, ipfsCid);
+    }
+
+    function revokeCredential(bytes32 credentialHash) external {
+        require(credentials[credentialHash].issuer == msg.sender, "Not issuer");
+        require(!credentials[credentialHash].revoked, "Already revoked");
+
+        credentials[credentialHash].revoked = true;
+
+        emit CredentialRevoked(credentialHash, msg.sender);
+    }
+
+    function verifyCredential(bytes32 credentialHash) external view returns (bool) {
+        return credentials[credentialHash].issuer != address(0) && !credentials[credentialHash].revoked;
+    }
+
+    function getCredential(bytes32 credentialHash) external view returns (Credential memory) {
+        return credentials[credentialHash];
+    }
+
+    function getUserCredentials(address user) external view returns (bytes32[] memory) {
+        return userCredentials[user];
+    }
+}
+```
+
+**MarketplaceContract.sol** (See Tech PRD.md for full 140-line implementation)
+
+**GovernanceContract.sol** (See Tech PRD.md for full 180-line implementation)
+
+### 3. IPFS/Arweave Storage
+
+#### Purpose
+
+Permanent, decentralized storage for ZK proofs, credential metadata, and immutable records.
+
+#### Technology Stack
+
+- **IPFS:** Content-addressed storage via Pinata
+- **Arweave:** Permanent storage for critical proofs (pay-once, store-forever)
+- **Encryption:** AES-256-GCM for sensitive data
+- **CDN:** Pinata Gateway for fast global delivery
+
+#### Data Categories
+
+**ZK Proof Data:**
+
+- Zero-knowledge proofs (zk-SNARKs generated by zkTLS)
+- Proof metadata (circuit type, public inputs)
+- Verification keys
+- Witness data (encrypted)
+
+**Credential Metadata:**
+
+- Credential schema definitions (JSON Schema format)
+- Category taxonomies
+- Tag mappings
+- Search indexes
 
 **Immutable Records:**
 
-- ZK credentials and proofs
-- Subscription transaction records
-- Content access logs (for creator analytics)
-- Platform governance decisions
-- Audit trails for compliance
+- Marketplace transaction receipts
+- Dispute evidence (screenshots, documents)
+- Governance proposal documents
+- Audit trail snapshots
 
-**Encrypted Data:**
-
-- Private content (encrypted with access keys)
-- User credential data (zero-knowledge format)
-- Sensitive platform communications
-
-#### Pinata IPFS Integration Architecture
+#### IPFS Integration Architecture
 
 ```typescript
-// src/lib/services/pinataStorage.ts
+// src/lib/services/ipfsStorage.ts
 import { PinataSDK } from 'pinata';
-import { encrypt, decrypt } from '$lib/crypto/encryption';
+import { create as createIPFSClient } from 'ipfs-http-client';
+import { encryptData, decryptData } from '$lib/crypto/encryption';
 
-export class PinataStorageService {
+export class IPFSStorageService {
 	private pinata: PinataSDK;
 
 	constructor() {
@@ -246,613 +384,532 @@ export class PinataStorageService {
 		});
 	}
 
-	// Upload content with optional encryption and geographic restrictions
-	async uploadContent(
-		file: File,
-		geoRestrictions?: {
-			allowedCountries?: string[];
-			restrictedCountries?: string[];
-		},
-		encrypt: boolean = false
+	// Upload ZK proof to IPFS with encryption
+	async uploadZKProof(
+		proof: object,
+		encrypt: boolean = true
 	): Promise<{
-		ipfsHash: string;
+		ipfsCid: string;
 		encryptionKey?: string;
-		fileSize: number;
 	}> {
-		let fileToUpload = file;
+		let dataToUpload = proof;
 		let encryptionKey: string | undefined;
 
 		if (encrypt) {
-			const { encryptedFile, key } = await this.encryptFile(file);
-			fileToUpload = encryptedFile;
+			const { encrypted, key } = await encryptData(JSON.stringify(proof));
+			dataToUpload = { encrypted };
 			encryptionKey = key;
 		}
 
-		const result = await this.pinata.upload.file(fileToUpload, {
+		const blob = new Blob([JSON.stringify(dataToUpload)], { type: 'application/json' });
+		const file = new File([blob], 'zkproof.json');
+
+		const result = await this.pinata.upload.file(file, {
 			metadata: {
-				name: file.name,
+				name: 'ZK Proof',
 				keyValues: {
-					contentType: file.type,
+					type: 'zk-proof',
 					encrypted: encrypt.toString(),
-					allowedCountries: metadata.allowedCountries?.join(',') || '',
-					restrictedCountries: metadata.restrictedCountries?.join(',') || ''
+					timestamp: new Date().toISOString()
 				}
 			}
 		});
 
-		// Store metadata in database
-		await this.storeContentMetadata({
-			ipfsHash: result.IpfsHash,
-			originalName: file.name,
-			contentType: file.type,
-			fileSize: file.size,
-			encrypted: encrypt
+		return {
+			ipfsCid: result.IpfsHash,
+			encryptionKey
+		};
+	}
+
+	// Retrieve and decrypt ZK proof
+	async getZKProof(ipfsCid: string, encryptionKey?: string): Promise<object> {
+		const response = await fetch(`${process.env.PINATA_GATEWAY_URL}/ipfs/${ipfsCid}`);
+		const data = await response.json();
+
+		if (encryptionKey && data.encrypted) {
+			const decrypted = await decryptData(data.encrypted, encryptionKey);
+			return JSON.parse(decrypted);
+		}
+
+		return data;
+	}
+
+	// Upload credential metadata
+	async uploadCredentialMetadata(metadata: {
+		type: string;
+		schema: object;
+		attributes: Record<string, any>;
+	}): Promise<string> {
+		const blob = new Blob([JSON.stringify(metadata)], { type: 'application/json' });
+		const file = new File([blob], 'credential-metadata.json');
+
+		const result = await this.pinata.upload.file(file, {
+			metadata: {
+				name: `Credential: ${metadata.type}`,
+				keyValues: {
+					credentialType: metadata.type,
+					timestamp: new Date().toISOString()
+				}
+			}
 		});
 
-		return {
-			ipfsHash: result.IpfsHash,
-			encryptionKey,
-			fileSize: file.size
-		};
+		return result.IpfsHash;
 	}
 
-	// Retrieve content with optional decryption
-	async getContent(ipfsHash: string, encryptionKey?: string): Promise<Blob> {
-		const gatewayUrl = `${process.env.PINATA_GATEWAY_URL}/ipfs/${ipfsHash}`;
-
-		const response = await fetch(gatewayUrl);
-		if (!response.ok) {
-			throw new Error(`Failed to fetch content: ${response.statusText}`);
-		}
-
-		const fileData = await response.arrayBuffer();
-
-		if (encryptionKey) {
-			return await this.decryptFile(new Uint8Array(fileData), encryptionKey);
-		}
-
-		return new Blob([fileData]);
-	}
-
-	// Pin content (already pinned by default with Pinata upload)
-	async pinContent(ipfsHash: string): Promise<void> {
-		// Pinata automatically pins uploaded content
-		// Optionally pin to backup services for redundancy
-		await this.pinToBackupServices(ipfsHash);
-	}
-
-	private async encryptFile(file: File): Promise<{
-		encryptedFile: File;
-		key: string;
-	}> {
-		const fileBuffer = await file.arrayBuffer();
-		const { encrypted, key } = await encrypt(new Uint8Array(fileBuffer));
-
-		return {
-			encryptedFile: new File([encrypted], file.name, { type: file.type }),
-			key
-		};
-	}
-
-	private async decryptFile(encryptedData: Uint8Array, key: string): Promise<Blob> {
-		const decrypted = await decrypt(encryptedData, key);
-		return new Blob([decrypted]);
-	}
-
-	private async storeContentMetadata(metadata: any): Promise<void> {
-		// Store in database for quick retrieval
-		// This is handled by the database layer
-	}
-
-	private async pinToBackupServices(ipfsHash: string): Promise<void> {
-		// Pin to multiple IPFS services for redundancy
-		// Pinata, Web3.Storage, etc.
+	// Pin existing IPFS content (from zkTLS generation)
+	async pinByCID(cid: string): Promise<void> {
+		await this.pinata.pin.cid(cid);
 	}
 }
 ```
 
-### 3. Smart Contract Storage (Moca Chain)
+#### Arweave Integration (Permanent Storage)
 
-#### Purpose
+```typescript
+// src/lib/services/arweaveStorage.ts
+import Arweave from 'arweave';
+import { JWKInterface } from 'arweave/node/lib/wallet';
 
-On-chain storage for critical transactional and governance data.
+export class ArweaveStorageService {
+	private arweave: Arweave;
+	private wallet: JWKInterface;
 
-#### Data Categories
+	constructor() {
+		this.arweave = Arweave.init({
+			host: 'arweave.net',
+			port: 443,
+			protocol: 'https'
+		});
 
-**Financial Transactions:**
+		// Load wallet from secure environment
+		this.wallet = JSON.parse(process.env.ARWEAVE_KEY!);
+	}
 
-- Subscription payments and refunds
-- Creator revenue distribution
-- Platform fee collection
-- Staking and slashing records
+	// Store critical proof permanently
+	async storeProofPermanently(
+		proof: object,
+		metadata: {
+			credentialType: string;
+			issuer: string;
+			timestamp: number;
+		}
+	): Promise<string> {
+		const data = JSON.stringify(proof);
 
-**Access Control:**
+		const transaction = await this.arweave.createTransaction(
+			{
+				data
+			},
+			this.wallet
+		);
 
-- ZK proof verification results
-- Content access permissions
-- Subscription status validation
-- Age verification confirmations
-- Location verification and geographic restrictions
+		// Add tags for discovery
+		transaction.addTag('App-Name', 'Enclave');
+		transaction.addTag('Content-Type', 'application/json');
+		transaction.addTag('Type', 'ZK-Proof');
+		transaction.addTag('Credential-Type', metadata.credentialType);
+		transaction.addTag('Issuer', metadata.issuer);
+		transaction.addTag('Timestamp', metadata.timestamp.toString());
 
-**Governance:**
+		await this.arweave.transactions.sign(transaction, this.wallet);
+		await this.arweave.transactions.post(transaction);
 
-- Platform parameter changes
-- Creator staking amounts
-- Community votes and proposals
-- Platform upgrade decisions
+		return transaction.id; // Arweave transaction ID
+	}
 
-#### Smart Contract Storage Schema
+	// Retrieve proof from Arweave
+	async getProof(txId: string): Promise<object> {
+		const data = await this.arweave.transactions.getData(txId, {
+			decode: true,
+			string: true
+		});
+
+		return JSON.parse(data as string);
+	}
+}
+```
+
+### 4. Smart Contract Storage Patterns
+
+#### Storage Optimization Patterns
+
+**Minimize On-Chain Data:**
 
 ```solidity
-// contracts/storage/EnclavePlatformStorage.sol
-contract EnclavePlatformStorage {
-    // Subscription records
-    mapping(address => mapping(address => Subscription)) public subscriptions; // fan => creator => subscription
+// Store only hashes on-chain, full data on IPFS
+struct Listing {
+    bytes32 credentialHash; // 32 bytes
+    address seller; // 20 bytes
+    uint256 price; // 32 bytes
+    string ipfsCid; // ~50 bytes (CID string)
+    // Total: ~134 bytes vs storing full proof (~10KB+)
+}
+```
 
-    // Content access control
-    mapping(bytes32 => ContentAccess) public contentAccess; // contentId => access rules
+**Event-Driven Architecture:**
 
-    // Creator staking
-    mapping(address => uint256) public creatorStakes;
+```solidity
+// Emit events for off-chain indexing (The Graph)
+event CredentialListed(
+    bytes32 indexed credentialHash,
+    address indexed seller,
+    uint256 price,
+    string ipfsCid,
+    uint256 timestamp
+);
 
-    // Platform revenue
-    uint256 public totalPlatformRevenue;
-    mapping(address => uint256) public creatorRevenue;
+event CredentialPurchased(
+    bytes32 indexed credentialHash,
+    address indexed buyer,
+    address indexed seller,
+    uint256 price,
+    uint256 timestamp
+);
+```
 
-    struct Subscription {
-        uint256 tierId;
-        uint256 amountPaid;
-        uint256 startTime;
-        uint256 endTime;
-        bool active;
-    }
+**Batch Operations:**
 
-    struct ContentAccess {
-        address creator;
-        uint256[] requiredTiers;
-        string[] requiredCredentials;
-        bool ageRestricted;
-        uint256 minAge;
-        string[] allowedCountries;
-        string[] restrictedCountries;
-        bool locationRestricted;
+```solidity
+// Batch credential issuance for gas efficiency
+function batchIssueCredentials(
+    bytes32[] calldata credentialHashes,
+    string[] calldata ipfsCids
+) external {
+    require(credentialHashes.length == ipfsCids.length, "Length mismatch");
+
+    for (uint i = 0; i < credentialHashes.length; i++) {
+        _issueCredential(credentialHashes[i], ipfsCids[i]);
     }
 }
 ```
 
 ## Data Flow Architecture
 
-### Content Upload Flow
+### Credential Creation Flow
 
 ```mermaid
 sequenceDiagram
-    participant Creator
+    participant User
     participant Frontend
-    participant Database
+    participant zkTLS
     participant IPFS
     participant Smart_Contract
-    participant Moca_Chain
+    participant Database
 
-    Creator->>Frontend: Upload video + metadata
-    Frontend->>Frontend: Encrypt content (if gated)
-    Frontend->>IPFS: Store encrypted video
-    IPFS->>Frontend: Return IPFS hash
-    Frontend->>Database: Store content metadata + IPFS hash
-    Frontend->>Smart_Contract: Record content access rules
-    Smart_Contract->>Moca_Chain: Store on-chain record
-    Database->>Frontend: Confirm metadata storage
-    Frontend->>Creator: Upload complete with content ID
+    User->>Frontend: Connect data source (e.g., LinkedIn)
+    Frontend->>zkTLS: Generate ZK proof
+    zkTLS->>Frontend: Return proof + metadata
+    Frontend->>IPFS: Upload encrypted proof
+    IPFS->>Frontend: Return CID
+    Frontend->>Smart_Contract: Issue credential (hash + CID)
+    Smart_Contract->>Frontend: Tx hash
+    Frontend->>Database: Store listing metadata
+    Database->>Frontend: Confirm storage
+    Frontend->>User: Credential created successfully
 ```
 
-### Content Access Flow
+### Marketplace Purchase Flow
 
 ```mermaid
 sequenceDiagram
-    participant Fan
+    participant Buyer
     participant Frontend
     participant Database
     participant Smart_Contract
     participant IPFS
-    participant Moca_Chain
 
-    Fan->>Frontend: Request protected content
-    Frontend->>Database: Get content metadata
-    Database->>Frontend: Return IPFS hash + access rules
-    Frontend->>Smart_Contract: Verify fan credentials
-    Smart_Contract->>Moca_Chain: Check ZK proofs
-    Moca_Chain->>Smart_Contract: Confirm access granted
-    Smart_Contract->>Frontend: Access approved
-    Frontend->>IPFS: Fetch content by hash
-    Frontend->>Frontend: Decrypt content (if needed)
-    IPFS->>Fan: Stream decrypted content
+    Buyer->>Frontend: Browse marketplace
+    Frontend->>Database: Search credentials
+    Database->>Frontend: Return listings
+    Buyer->>Frontend: Select credential
+    Frontend->>Smart_Contract: Purchase (pay $MOCA)
+    Smart_Contract->>Smart_Contract: Transfer tokens
+    Smart_Contract->>Frontend: Emit PurchaseEvent
+    Frontend->>IPFS: Fetch proof by CID
+    IPFS->>Frontend: Return encrypted proof
+    Frontend->>Frontend: Decrypt with access key
+    Frontend->>Buyer: Deliver credential data
+    Frontend->>Database: Update purchase history
 ```
 
-### Subscription Payment Flow
+### Trust System Flow (Vouching)
 
 ```mermaid
 sequenceDiagram
-    participant Fan
+    participant Voucher
     participant Frontend
-    participant Database
     participant Smart_Contract
-    participant Moca_Chain
-    participant Creator
+    participant Database
 
-    Fan->>Frontend: Subscribe to tier
-    Frontend->>Smart_Contract: Process $MOCA payment
-    Smart_Contract->>Moca_Chain: Record transaction
-    Smart_Contract->>Smart_Contract: Calculate fees (5%)
-    Smart_Contract->>Creator: Transfer creator payout
-    Smart_Contract->>Frontend: Emit subscription event
-    Frontend->>Database: Update subscription status
-    Database->>Frontend: Confirm update
-    Frontend->>Fan: Subscription active
+    Voucher->>Frontend: Vouch for seller
+    Frontend->>Smart_Contract: Stake $MOCA tokens
+    Smart_Contract->>Smart_Contract: Lock stake
+    Smart_Contract->>Frontend: Emit VouchedEvent
+    Frontend->>Database: Cache vouch relationship
+    Database->>Frontend: Update reputation scores
+
+    Note over Smart_Contract,Database: If seller misbehaves:
+
+    Frontend->>Smart_Contract: Report + Evidence
+    Smart_Contract->>Smart_Contract: Governance vote
+    Smart_Contract->>Smart_Contract: Slash stake if guilty
+    Smart_Contract->>Frontend: Emit SlashedEvent
+    Frontend->>Database: Update trust scores
 ```
 
-## Storage Performance & Optimization
+## Data Retention & Privacy
 
-### Database Optimization
+### Privacy Principles
 
-**Connection Pooling:**
+1. **Zero-Knowledge Storage**: No raw PII stored anywhere
+2. **Credential Hashing**: Only keccak256 hashes on-chain
+3. **Encrypted IPFS**: ZK proofs encrypted with buyer-only access keys
+4. **Right to Deletion**: Users can revoke credentials (mark as revoked on-chain)
+
+### Retention Policy
+
+| Data Type            | Retention Period     | Storage Location | Deletion Process                                     |
+| -------------------- | -------------------- | ---------------- | ---------------------------------------------------- |
+| User Sessions        | 24 hours             | PostgreSQL       | Auto-expire                                          |
+| Marketplace Listings | Until seller removes | Database + Chain | Soft delete (DB), revoke flag (chain)                |
+| ZK Proofs            | Permanent            | IPFS/Arweave     | Cannot delete (immutable), revoke credential instead |
+| Transaction History  | Permanent            | On-chain         | Cannot delete (blockchain property)                  |
+| Purchase Records     | 7 years (compliance) | Database         | Archive after 7 years                                |
+| Audit Logs           | 2 years              | PostgreSQL       | Rolling deletion                                     |
+
+### GDPR Compliance
+
+**Right to Erasure Implementation:**
 
 ```typescript
-// src/lib/database/connection.ts
-import { Pool } from 'pg';
+// Pseudonymization: Wallet addresses as identifiers (no PII)
+// Credential revocation instead of deletion
+async revokeCredential(credentialHash: string, userId: string) {
+	// 1. Mark as revoked on-chain (permanent flag)
+	await credentialContract.revokeCredential(credentialHash);
 
-export const dbPool = new Pool({
-	host: process.env.DATABASE_HOST,
-	port: parseInt(process.env.DATABASE_PORT || '5432'),
-	database: process.env.DATABASE_NAME,
-	user: process.env.DATABASE_USER,
-	password: process.env.DATABASE_PASSWORD,
-	max: 20, // Maximum connections in pool
-	idleTimeoutMillis: 30000,
-	connectionTimeoutMillis: 2000
-});
+	// 2. Remove from marketplace listings
+	await db.credentialListings.update({
+		where: { credentialHash },
+		data: { status: 'revoked' }
+	});
+
+	// 3. Clear cached proof from IPFS (unpin)
+	await ipfsService.unpin(credentialHash);
+
+	// 4. Anonymize database records
+	await db.users.update({
+		where: { id: userId },
+		data: {
+			display_name: '[DELETED]',
+			avatar_url: null
+		}
+	});
+}
 ```
 
-### Environment Configuration
+## Backup & Disaster Recovery
 
-**Required Environment Variables:**
+### Backup Strategy
 
-```bash
-# Database Configuration (Neon PostgreSQL)
-DATABASE_URL="postgresql://username:password@host:5432/database?sslmode=require"
-DATABASE_HOST="ep-xxx-xxx.us-east-1.aws.neon.tech"
-DATABASE_PORT="5432"
-DATABASE_NAME="enclave"
-DATABASE_USER="username"
-DATABASE_PASSWORD="password"
+**Database (PostgreSQL):**
 
-# Pinata IPFS Configuration
-PINATA_JWT="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-PINATA_GATEWAY_URL="https://gateway.pinata.cloud"
-PINATA_API_KEY="your-pinata-api-key"
-PINATA_SECRET_KEY="your-pinata-secret-key"
+- **Frequency:** Automated snapshots every 6 hours
+- **Retention:** 30 days of point-in-time recovery
+- **Storage:** Railway/Supabase automated backups
+- **Testing:** Monthly restore tests to staging environment
 
-# Moca Network Integration
-MOCA_IPFS_TOKEN="moca-ipfs-backup-token"
-MOCA_STORAGE_ENDPOINT="https://ipfs.moca.network"
+**IPFS (Pinata):**
 
-# Cache Configuration (Optional)
-REDIS_URL="redis://localhost:6379"
-```
+- **Redundancy:** Multi-region pinning (3 regions minimum)
+- **Backup:** Secondary pinning to Filebase or Web3.Storage
+- **Verification:** Weekly CID integrity checks
+- **Recovery:** Automated re-pinning on failure detection
 
-**Query Optimization:**
+**Smart Contracts:**
+
+- **Immutability:** Code cannot be deleted once deployed
+- **Upgradability:** Proxy pattern for critical bug fixes
+- **Archive Nodes:** Full blockchain history preserved by Moca Chain validators
+- **Event Indexing:** The Graph subgraph as secondary data source
+
+### Disaster Recovery Plan
+
+**Scenario 1: Database Failure**
+
+1. Detect failure via health checks (30s interval)
+2. Automatic failover to read replica (<2 min)
+3. Restore from latest snapshot (target: <15 min)
+4. Rebuild indexes and validate data integrity
+5. Resume normal operations
+
+**Scenario 2: IPFS Pinning Service Outage**
+
+1. Detect via gateway health checks
+2. Failover to secondary pinning service (Filebase)
+3. Re-pin critical CIDs to new service
+4. Update gateway URLs in database
+5. Resume content delivery
+
+**Scenario 3: Smart Contract Exploit**
+
+1. Pause contract via emergency stop function
+2. Assess vulnerability and impact
+3. Deploy patched contract via proxy upgrade
+4. Compensate affected users from treasury
+5. Post-mortem and security audit
+
+## Scaling Considerations
+
+### Performance Targets
+
+| Metric               | Target           | Current Capacity     | Scaling Strategy                  |
+| -------------------- | ---------------- | -------------------- | --------------------------------- |
+| Database Queries     | <100ms p95       | 10K QPS              | Read replicas, query optimization |
+| IPFS Retrieval       | <500ms p95       | 1K req/s             | CDN caching, regional gateways    |
+| Smart Contract Calls | <3s (block time) | 500 TPS (Moca Chain) | Batch operations, L2 if needed    |
+| Search Response      | <200ms p95       | 5K searches/min      | Elasticsearch integration         |
+
+### Horizontal Scaling
+
+**Database Sharding Strategy:**
 
 ```sql
--- Materialized views for analytics
-CREATE MATERIALIZED VIEW creator_analytics_daily AS
-SELECT
-    creator_id,
-    date,
-    COUNT(DISTINCT fan_id) as unique_fans,
-    SUM(revenue_moca) as daily_revenue,
-    COUNT(*) as total_interactions
-FROM analytics_events
-WHERE event_type IN ('subscription', 'content_view')
-GROUP BY creator_id, date;
+-- Shard by user wallet address (first 2 bytes)
+CREATE TABLE credential_listings_00 PARTITION OF credential_listings
+FOR VALUES FROM ('0x00000000') TO ('0x00FFFFFF');
 
--- Refresh materialized views daily
-CREATE OR REPLACE FUNCTION refresh_analytics_views()
-RETURNS void AS $$
-BEGIN
-    REFRESH MATERIALIZED VIEW CONCURRENTLY creator_analytics_daily;
-END;
-$$ LANGUAGE plpgsql;
+CREATE TABLE credential_listings_01 PARTITION OF credential_listings
+FOR VALUES FROM ('0x01000000') TO ('0x01FFFFFF');
+
+-- Continue for all shards...
 ```
 
-### IPFS Optimization
-
-**Content Delivery Network:**
+**IPFS Load Balancing:**
 
 ```typescript
-// src/lib/services/contentDelivery.ts
-export class ContentDeliveryService {
-	private readonly cdnEndpoints = [
-		'https://gateway.pinata.cloud', // Primary Pinata gateway
-		'https://ipfs.moca.network', // Secondary Moca gateway
-		'https://cf-ipfs.com' // Fallback public gateway
-	];
+// Round-robin across multiple gateways
+const gateways = [
+	'https://gateway1.pinata.cloud',
+	'https://gateway2.pinata.cloud',
+	'https://dweb.link'
+];
 
-	async getOptimalGateway(ipfsHash: string): Promise<string> {
-		// Test latency to each gateway
-		const latencyTests = this.cdnEndpoints.map(async (endpoint) => {
-			const start = Date.now();
-			try {
-				await fetch(`${endpoint}/ipfs/${ipfsHash}?timeout=5s`);
-				return { endpoint, latency: Date.now() - start };
-			} catch {
-				return { endpoint, latency: Infinity };
-			}
-		});
+let currentIndex = 0;
 
-		const results = await Promise.all(latencyTests);
-		const fastest = results.reduce((best, current) =>
-			current.latency < best.latency ? current : best
-		);
-
-		return fastest.endpoint;
-	}
+function getNextGateway(): string {
+	const gateway = gateways[currentIndex];
+	currentIndex = (currentIndex + 1) % gateways.length;
+	return gateway;
 }
 ```
 
-### Caching Strategy
+## Monitoring & Observability
 
-**Multi-Layer Caching:**
+### Key Metrics
 
-```typescript
-// src/lib/services/cacheService.ts
-import Redis from 'ioredis';
+**Storage Metrics:**
 
-export class CacheService {
-	private redis = new Redis(process.env.REDIS_URL);
+- Database size and growth rate
+- IPFS pin count and storage usage
+- Smart contract state size
+- Query response times (p50, p95, p99)
 
-	// L1: In-memory cache (fastest)
-	private memoryCache = new Map<string, any>();
+**Business Metrics:**
 
-	// L2: Redis cache (fast, persistent)
-	async get(key: string): Promise<any> {
-		// Check L1 cache first
-		if (this.memoryCache.has(key)) {
-			return this.memoryCache.get(key);
-		}
+- Credentials issued per day
+- Marketplace transactions volume
+- Trust system activity (vouches, slashes)
+- Revenue in $MOCA tokens
 
-		// Check L2 cache
-		const cached = await this.redis.get(key);
-		if (cached) {
-			const data = JSON.parse(cached);
-			this.memoryCache.set(key, data); // Populate L1
-			return data;
-		}
+### Monitoring Stack
 
-		return null;
-	}
+```yaml
+# Prometheus metrics
+- postgres_connections_active
+- ipfs_pins_total
+- smart_contract_gas_used
+- marketplace_listings_active
 
-	async set(key: string, value: any, ttl: number = 300): Promise<void> {
-		// Set in both caches
-		this.memoryCache.set(key, value);
-		await this.redis.setex(key, ttl, JSON.stringify(value));
-	}
-}
-```
+# Grafana dashboards
+- Database performance
+- IPFS health
+- Blockchain metrics
+- Marketplace analytics
 
-## Security & Privacy
-
-### Data Encryption
-
-**Content Encryption:**
-
-```typescript
-// src/lib/crypto/encryption.ts
-import { randomBytes, createCipher, createDecipher } from 'crypto';
-
-export async function encryptContent(content: Uint8Array): Promise<{
-	encrypted: Uint8Array;
-	key: string;
-}> {
-	const key = randomBytes(32).toString('hex');
-	const cipher = createCipher('aes-256-cbc', key);
-
-	const encrypted = Buffer.concat([cipher.update(content), cipher.final()]);
-
-	return {
-		encrypted: new Uint8Array(encrypted),
-		key
-	};
-}
-
-export async function decryptContent(encrypted: Uint8Array, key: string): Promise<Uint8Array> {
-	const decipher = createDecipher('aes-256-cbc', key);
-
-	const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
-
-	return new Uint8Array(decrypted);
-}
-```
-
-### Access Control
-
-**Database Row-Level Security:**
-
-```sql
--- Enable RLS on sensitive tables
-ALTER TABLE users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE creator_profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE content_items ENABLE ROW LEVEL SECURITY;
-
--- Users can only see their own data
-CREATE POLICY user_isolation ON users
-    FOR ALL
-    TO authenticated
-    USING (wallet_address = current_user_wallet());
-
--- Creators can only manage their own content
-CREATE POLICY creator_content_access ON content_items
-    FOR ALL
-    TO authenticated
-    USING (creator_id = current_user_id());
-```
-
-## Backup & Recovery
-
-### Database Backup Strategy
-
-**Automated Backups:**
-
-```bash
-#!/bin/bash
-# scripts/backup-database.sh
-
-# Full backup daily
-pg_dump $DATABASE_URL | gzip > backups/enclave-$(date +%Y%m%d).sql.gz
-
-# Point-in-time recovery setup
-pg_basebackup -D /backup/base -Ft -z -P -U postgres
-
-# Upload to cloud storage
-aws s3 cp backups/ s3://enclave-backups/ --recursive
-```
-
-### IPFS Content Backup
-
-**Multi-Provider Pinning:**
-
-```typescript
-// src/lib/services/backupService.ts
-export class BackupService {
-	private readonly pinningServices = [
-		{ name: 'Pinata', endpoint: 'https://api.pinata.cloud', primary: true },
-		{ name: 'Web3Storage', endpoint: 'https://api.web3.storage', primary: false },
-		{ name: 'MocaIPFS', endpoint: 'https://ipfs.moca.network', primary: false }
-	];
-
-	async backupContent(ipfsHash: string): Promise<void> {
-		// Pin content to multiple services
-		const backupPromises = this.pinningServices.map((service) =>
-			this.pinToService(service, ipfsHash)
-		);
-
-		await Promise.allSettled(backupPromises);
-	}
-
-	private async pinToService(service: any, ipfsHash: string): Promise<void> {
-		// Implementation for each pinning service
-	}
-}
-```
-
-## Monitoring & Analytics
-
-### Storage Monitoring
-
-**Database Performance:**
-
-```sql
--- Monitor slow queries
-CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
-
--- Query to find slow operations
-SELECT
-    query,
-    calls,
-    total_time,
-    mean_time,
-    rows
-FROM pg_stat_statements
-ORDER BY total_time DESC
-LIMIT 10;
-```
-
-**IPFS Health Monitoring:**
-
-```typescript
-// src/lib/monitoring/ipfsHealth.ts
-export class IPFSHealthMonitor {
-	async checkHealth(): Promise<{
-		status: 'healthy' | 'degraded' | 'down';
-		latency: number;
-		pinCount: number;
-	}> {
-		const start = Date.now();
-
-		try {
-			const id = await this.ipfs.id();
-			const pins = await this.ipfs.pin.ls();
-			const pinCount = Array.from(pins).length;
-
-			return {
-				status: 'healthy',
-				latency: Date.now() - start,
-				pinCount
-			};
-		} catch (error) {
-			return {
-				status: 'down',
-				latency: -1,
-				pinCount: 0
-			};
-		}
-	}
-}
+# Alerts
+- Database CPU > 80% for 5min
+- IPFS gateway latency > 1s
+- Smart contract out of gas
+- Unusual transaction volume
 ```
 
 ## Cost Analysis
 
-### Storage Cost Breakdown
+### Monthly Storage Costs (10K Users)
 
-**Database (PostgreSQL on Railway):**
+| Service              | Usage            | Cost/Month      | Notes                  |
+| -------------------- | ---------------- | --------------- | ---------------------- |
+| PostgreSQL (Railway) | 10GB database    | $20             | Includes backups       |
+| Pinata IPFS          | 100GB pinned     | $20             | Free tier + paid       |
+| Arweave (permanent)  | 10GB uploaded    | $50 one-time    | Pay-once model         |
+| Moca Chain gas       | 50K transactions | $100 (est.)     | Depends on gas price   |
+| **Total**            |                  | **~$140/month** | + $50 one-time Arweave |
 
-- **Starter Plan:** $5/month - 1GB storage, 1GB RAM
-- **Pro Plan:** $20/month - 8GB storage, 8GB RAM
-- **Estimated Usage:** ~100MB for 1000 users, $5-20/month
+### Scaling Cost Projections
 
-**IPFS Storage:**
+**100K Users:**
 
-- **Pinning Services:** $0.10-0.50 per GB/month
-- **Moca MCSP:** Estimated $0.05-0.20 per GB/month
-- **Content Delivery:** $0.01-0.05 per GB transferred
+- Database: $200/month (100GB, 50K QPS)
+- IPFS: $200/month (1TB pinned)
+- Arweave: $500 one-time (100GB)
+- Gas: $1,000/month (500K txs)
+- **Total: ~$1,400/month**
 
-**Smart Contract Storage:**
+**1M Users:**
 
-- **Moca Chain:** ~$0.0001 per transaction
-- **Storage Fees:** Minimal for small data amounts
+- Database: $2,000/month (1TB, sharded)
+- IPFS: $2,000/month (10TB pinned)
+- Arweave: $5,000 one-time (1TB)
+- Gas: $10,000/month (5M txs)
+- **Total: ~$14,000/month**
 
-**Total Estimated Costs (1000 users, 10TB content):**
+## Implementation Checklist
 
-- Database: $20/month
-- IPFS Storage: $500-2000/month
-- CDN: $100-500/month
-- **Total: $620-2520/month**
+### Phase 1: Core Infrastructure (Weeks 1-4)
 
-## Implementation Timeline
+- [ ] Set up PostgreSQL database with schema
+- [ ] Configure Pinata IPFS account + SDK integration
+- [ ] Deploy smart contracts to Moca testnet
+- [ ] Implement basic CRUD operations for credentials
+- [ ] Set up monitoring (Prometheus + Grafana)
 
-### Phase 1: Database Setup (Days 1-2)
+### Phase 2: Marketplace Features (Weeks 5-8)
 
-- PostgreSQL setup and schema creation
-- Prisma ORM integration
-- Basic CRUD operations
-- Connection pooling and optimization
+- [ ] Build credential listing functionality
+- [ ] Implement purchase flow with $MOCA payments
+- [ ] Add search and filtering (PostgreSQL full-text)
+- [ ] Integrate The Graph for on-chain event indexing
+- [ ] Deploy to Moca mainnet
 
-### Phase 2: Pinata IPFS Integration (Days 3-4)
+### Phase 3: Trust System (Weeks 9-12)
 
-- Pinata SDK implementation
-- Content upload with metadata
-- Content encryption/decryption
-- Gateway optimization and fallbacks
+- [ ] Implement vouching smart contract
+- [ ] Build slashing mechanism with governance
+- [ ] Add reputation score calculations
+- [ ] Create trust network visualization
+- [ ] Security audit of trust contracts
 
-### Phase 3: Smart Contract Storage (Days 5-6)
+### Phase 4: Optimization (Weeks 13-16)
 
-- Deploy storage contracts to Moca Chain
-- Integrate contract interactions
-- Implement access control verification
-- Test transaction recording
+- [ ] Add Arweave integration for critical proofs
+- [ ] Implement database sharding
+- [ ] Set up CDN caching for IPFS content
+- [ ] Optimize smart contract gas usage
+- [ ] Load testing and performance tuning
 
-### Phase 4: Optimization & Monitoring (Days 7-8)
+---
 
-- Implement caching layers
-- Set up monitoring and alerts
-- Performance optimization
-- Backup and recovery testing
-
-This storage architecture provides a robust, scalable, and privacy-preserving foundation for the Enclave platform, leveraging the best aspects of both centralized and decentralized storage solutions.
+**Document Version:** 2.0  
+**Last Updated:** October 19, 2025  
+**Maintained By:** Enclave Core Team

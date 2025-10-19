@@ -2,7 +2,374 @@
 
 ## Overview
 
-This document details the credential verification system implemented in Enclave, based on the [MocaNetwork/air-credential-example](https://github.com/MocaNetwork/air-credential-example) reference implementation.
+# Credential Verification System
+
+Complete technical documentation for Enclave's credential verification system powered by Moca Network's AIR Credential Services.
+
+## Overview
+
+The credential verification system allows creators (companies) to verify fan credentials in real-time using Zero-Knowledge proofs. This ensures privacy while confirming that users meet specific requirements (e.g., "Twitter followers >1K" or "Attended 5+ soccer matches").
+
+## Architecture
+
+### Components
+
+1. **Frontend (SvelteKit)**: User interface for verification flow
+2. **AIR Credential SDK**: Handles verification widget and proof validation
+3. **JWT Service**: Generates authentication tokens for verification operations
+4. **Moca Chain**: Stores verification results and transaction history
+5. **zkTLS Oracle**: Validates credentials cryptographically
+
+### Flow Diagram
+
+```
+User Request Verification
+         ↓
+Generate JWT (Server-side with partnerId + scope)
+         ↓
+Initialize AIR Widget with JWT + programId
+         ↓
+User Completes Verification (zkTLS proof generation)
+         ↓
+AIR SDK Returns Verification Result
+         ↓
+Display Status (Compliant/Non-Compliant/Pending/etc.)
+         ↓
+Store in Verification History (Local + On-chain option)
+```
+
+## Implementation Details
+
+### 1. JWT Generation
+
+**Endpoint**: `/api/generate-jwt`
+
+**Purpose**: Create a signed JWT token for AIR Credential operations
+
+**Parameters**:
+
+```typescript
+{
+  operation: 'verification',
+  scope: 'issue verify',
+  partnerId: string,
+  algorithm: 'ES256' | 'RS256'
+}
+```
+
+**Response**:
+
+```typescript
+{
+  token: string,  // JWT token for authentication
+  expiresIn: number
+}
+```
+
+### 2. Verification Configuration
+
+**Environment Variables**:
+
+```env
+PUBLIC_CREATOR_VERIFY_ID=your_program_id        # Moca program ID
+PUBLIC_VERIFIER_DID=did:example:verifier123     # Your DID
+PUBLIC_PARTNERID=your_partner_id                # Partner identifier
+PUBLIC_REDIRECT_URL_FOR_ISSUER=http://localhost:5173
+```
+
+### 3. Verification Statuses
+
+The system supports 7 verification states:
+
+| Status            | Description                    | UI Color |
+| ----------------- | ------------------------------ | -------- |
+| **Compliant**     | User meets all requirements    | Green    |
+| **Non-Compliant** | User doesn't meet requirements | Red      |
+| **Pending**       | Verification in progress       | Yellow   |
+| **Revoking**      | Credential being revoked       | Orange   |
+| **Revoked**       | Credential has been revoked    | Gray     |
+| **Expired**       | Credential has expired         | Gray     |
+| **NotFound**      | No credential found            | Gray     |
+
+### 4. UI Components
+
+**Status Badge**:
+
+- Displays current verification state
+- Color-coded for quick visual recognition
+- Includes status icon (CheckCircle2, XCircle, Clock, etc.)
+
+**Verification History**:
+
+- Tracks all verification attempts
+- Shows timestamp, status, and fan address
+- Expandable details for each verification
+
+**Configuration Checker**:
+
+- Validates environment setup
+- Shows which variables are configured
+- Warns if missing required settings
+
+## Code Examples
+
+### Initialize Verification
+
+```typescript
+import { mocaAuth } from '$lib/services/useAirKit';
+
+async function startVerification() {
+	// 1. Generate JWT token
+	const jwtResponse = await fetch('/api/generate-jwt', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({
+			operation: 'verification',
+			scope: 'issue verify'
+		})
+	});
+
+	const { token: authToken } = await jwtResponse.json();
+
+	// 2. Start verification with AIR SDK
+	const result = await mocaAuth.airService.verifyCredential({
+		authToken,
+		programId: PUBLIC_CREATOR_VERIFY_ID,
+		redirectUrl: PUBLIC_REDIRECT_URL_FOR_ISSUER
+	});
+
+	// 3. Handle result
+	if (result.status === 'Compliant') {
+		console.log('User verified successfully!');
+		// Grant access, award points, etc.
+	}
+}
+```
+
+### Status Helpers
+
+```typescript
+function getStatusColor(status: string): string {
+	switch (status) {
+		case 'Compliant':
+			return 'bg-green-100 text-green-800 border-green-300';
+		case 'Non-Compliant':
+			return 'bg-red-100 text-red-800 border-red-300';
+		case 'Pending':
+			return 'bg-yellow-100 text-yellow-800 border-yellow-300';
+		case 'Revoking':
+			return 'bg-orange-100 text-orange-800 border-orange-300';
+		case 'Revoked':
+		case 'Expired':
+		case 'NotFound':
+			return 'bg-gray-100 text-gray-800 border-gray-300';
+		default:
+			return 'bg-gray-100 text-gray-600 border-gray-200';
+	}
+}
+
+function getStatusIcon(status: string): typeof LucideIcon {
+	switch (status) {
+		case 'Compliant':
+			return CheckCircle2;
+		case 'Non-Compliant':
+			return XCircle;
+		case 'Pending':
+			return Clock;
+		case 'Revoking':
+			return AlertTriangle;
+		case 'Revoked':
+			return Ban;
+		case 'Expired':
+			return Calendar;
+		case 'NotFound':
+			return Search;
+		default:
+			return AlertCircle;
+	}
+}
+```
+
+## Security Considerations
+
+### JWT Security
+
+- JWTs are signed server-side with ES256/RS256
+- Include `partnerId` in claims for authorization
+- Short expiration time (recommended: 1 hour)
+- Never expose private keys to frontend
+
+### Privacy Protection
+
+- Zero-Knowledge proofs ensure user data privacy
+- Only verification results are shared, not raw data
+- User maintains full control over credential lifecycle
+
+### Access Control
+
+- Verify JWT on every verification request
+- Validate `programId` matches registered program
+- Check user authorization before verification
+
+## Testing
+
+### Unit Tests
+
+```typescript
+import { describe, it, expect } from 'vitest';
+
+describe('Credential Verification', () => {
+	it('should generate valid JWT', async () => {
+		const jwt = await generateVerificationJWT();
+		expect(jwt).toBeDefined();
+		expect(jwt.split('.').length).toBe(3);
+	});
+
+	it('should return correct status color', () => {
+		expect(getStatusColor('Compliant')).toContain('green');
+		expect(getStatusColor('Non-Compliant')).toContain('red');
+	});
+
+	it('should handle verification result', async () => {
+		const result = await verifyCredential('test-program-id');
+		expect(result).toHaveProperty('status');
+	});
+});
+```
+
+### Integration Testing
+
+1. **Setup Mock Environment**:
+
+   ```typescript
+   process.env.PUBLIC_CREATOR_VERIFY_ID = 'test-program-123';
+   process.env.PUBLIC_PARTNERID = 'test-partner';
+   ```
+
+2. **Test Verification Flow**:
+   - Generate JWT
+   - Call verification API
+   - Validate response structure
+   - Check status handling
+
+3. **Test Edge Cases**:
+   - Missing configuration
+   - Invalid JWT
+   - Network failures
+   - Expired credentials
+
+## Troubleshooting
+
+### Common Issues
+
+**Issue**: "Configuration Required" warning
+
+**Solution**: Set `PUBLIC_CREATOR_VERIFY_ID` in `.env`:
+
+```env
+PUBLIC_CREATOR_VERIFY_ID=your_program_id
+```
+
+---
+
+**Issue**: JWT generation fails
+
+**Solution**:
+
+- Verify `PUBLIC_PARTNERID` is set
+- Check server-side signing key configuration
+- Ensure ES256/RS256 algorithm is supported
+
+---
+
+**Issue**: Verification widget doesn't load
+
+**Solution**:
+
+- Check `PUBLIC_REDIRECT_URL_FOR_ISSUER` is correct
+- Verify domain is whitelisted with Moca team
+- Inspect browser console for errors
+
+---
+
+**Issue**: "NotFound" status for valid credentials
+
+**Solution**:
+
+- Ensure `programId` matches the credential's program
+- Verify user has issued the credential
+- Check credential hasn't expired
+
+## API Reference
+
+### AIR Credential SDK
+
+```typescript
+interface VerifyCredentialParams {
+  authToken: string;      // JWT from generate-jwt endpoint
+  programId: string;      // Program ID for verification
+  redirectUrl: string;    // Callback URL after verification
+}
+
+interface VerificationResult {
+  status: 'Compliant' | 'Non-Compliant' | 'Pending' | 'Revoking' |
+          'Revoked' | 'Expired' | 'NotFound';
+  credentialId?: string;
+  timestamp: string;
+  proof?: string;         // ZK proof data
+  metadata?: Record<string, any>;
+}
+
+// Verify credential
+await airService.verifyCredential(params: VerifyCredentialParams): Promise<VerificationResult>
+```
+
+## Best Practices
+
+1. **Always Generate Fresh JWTs**: Don't reuse old tokens
+2. **Handle All Status Cases**: Plan for Pending, Expired, etc.
+3. **Store Verification History**: Keep audit trail for compliance
+4. **Validate Configuration**: Check env vars before operations
+5. **Provide Clear Feedback**: Show loading states and error messages
+6. **Test Edge Cases**: Network failures, timeouts, invalid data
+7. **Monitor Performance**: Track verification completion times
+8. **Respect Privacy**: Only access necessary credential attributes
+
+## Production Checklist
+
+Before deploying to production:
+
+- [ ] Generate production JWT signing keys (ES256/RS256)
+- [ ] Register production domain with Moca Network
+- [ ] Obtain production `programId` from Moca Dashboard
+- [ ] Configure production environment variables
+- [ ] Set up monitoring for verification success rates
+- [ ] Implement error tracking (Sentry, etc.)
+- [ ] Add rate limiting for JWT generation
+- [ ] Test verification flow end-to-end
+- [ ] Document user verification requirements
+- [ ] Set up backup/recovery procedures
+
+## Resources
+
+- [Moca AIR Credential Docs](https://docs.moca.network/air-credential)
+- [zkTLS Documentation](https://docs.moca.network/zktls)
+- [Example Implementation](https://github.com/MocaNetwork/air-credential-example)
+- [Moca Dashboard](https://dashboard.moca.network)
+- [Enclave Documentation](https://enclave-docs.netlify.app)
+
+## Support
+
+For technical support:
+
+- Discord: [discord.gg/mocaverse](https://discord.gg/mocaverse)
+- Email: support@enclave.app
+- GitHub Issues: [github.com/adetyaz/enclave/issues](https://github.com/adetyaz/enclave/issues)
+
+---
+
+**Last Updated**: October 19, 2025  
+**Version**: 1.0.0
 
 ## Architecture
 

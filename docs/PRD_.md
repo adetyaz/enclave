@@ -1,53 +1,396 @@
-# Enclave
+# Enclave - Product Requirements Document
+
+**Version:** 2.0  
+**Last Updated:** October 19, 2025  
+**Status:** Active Development
+
+## Executive Summary
+
+Enclave is a privacy-first data monetization platform built on Moca Network where users convert their personal data into Zero-Knowledge (ZK) credentials, list them in a decentralized marketplace, and earn $MOCA tokens—all while maintaining complete privacy through zkTLS technology.
+
+**Tagline:** Own Your Data, Earn Your Worth
+
+---
 
 ## Problem Statement
 
-The creator economy (e.g., OnlyFans, Fansly) faces significant challenges:
+### Current State: Users Have No Control Over Their Data
 
-### Fans
+**For Users (Data Providers):**
 
-Privacy concerns prevent engagement, as platforms often require sharing sensitive data (e.g., real names, wallet addresses, exact age) to access content, risking data leaks or tracking.
+- Platforms exploit user data (social media activity, game spending, event attendance) without consent or compensation
+- Privacy is compromised as raw personal data is shared across platforms
+- No way to monetize valuable behavioral data
+- Trust is broken due to data breaches and misuse
 
-### Creators
+**For Companies (Data Buyers):**
 
-Fraud (e.g., chargebacks, scalping) and compliance burdens (e.g., manual age verification, KYC/AML) increase operational costs and legal risks.
+- Struggle to find verified users for targeted marketing and user acquisition
+- Waste resources on fake accounts and bot traffic
+- Limited access to quality user data for campaigns
+- No reliable way to verify user claims (e.g., "I'm a frequent gamer")
 
-### Platforms
+**For the Ecosystem:**
 
-Centralized systems store sensitive user data, creating honeypots for breaches and limiting interoperability across ecosystems.
+- Centralized platforms control all user data
+- No transparency in data usage
+- No community trust mechanisms
+- Users have no incentive to maintain accurate profiles
 
-These issues hinder trust, scalability, and user empowerment in the creator economy, especially in Web3, where privacy and decentralization are core values.
+### Market Opportunity
 
-Enclave solves these by providing a decentralized, privacy-preserving platform on Moca Chain, where creators gate content with ZK credentials, fans prove eligibility without data exposure, and Animoca's 700M+ user ecosystem drives adoption.
+- **700M+ users** in Animoca/Moca ecosystem
+- **$200B+ data broker industry** (but users get $0)
+- **Growing privacy concerns** driving Web3 adoption
+- **$MOCA token utility** expansion opportunity
 
-## Solution
+---
 
-Enclave is a decentralized, privacy-preserving subscription platform built on Moca Network, enabling creators to offer exclusive content (e.g., videos, NFTs, streams) gated by zero-knowledge (ZK) credentials. Fans prove eligibility (e.g., "age >18", "Tier 1 Subscriber", "Mocaverse NFT holder") without revealing sensitive data, ensuring privacy and preventing fraud. Creators manage subscriptions via a dashboard, using $MOCA for payments and governance. The platform integrates with Animoca's ecosystem (e.g., OneFootball, The Sandbox) to tap 700M+ users, offering a scalable, Web3-native alternative to OnlyFans/Fansly.
+## Solution: Decentralized Data Monetization Marketplace
+
+Enclave enables a privacy-preserving data marketplace where:
+
+### For Users (Data Providers)
+
+1. **Create ZK Credentials** from your data using zkTLS (Twitter followers, game activity, event attendance, wallet transactions)
+2. **List in Marketplace** - Set your own prices (e.g., "Twitter >1K followers" = 2 $MOCA)
+3. **Earn $MOCA** - Get paid when companies purchase access (you keep 95%, platform takes 5%)
+4. **Maintain Control** - Revoke access anytime, update credentials, manage permissions
+
+### For Companies (Data Buyers)
+
+1. **Browse Marketplace** - Filter by credential type, price, trust score
+2. **Verify Quality** - Check community vouch scores and reputation
+3. **Purchase Access** - Buy ZK proofs (not raw data) for targeted marketing
+4. **Track Performance** - Monitor campaign success and ROI
+
+### For the Ecosystem (Trust Layer)
+
+1. **Vouching** - Stake $MOCA to endorse credential authenticity
+2. **Slashing** - Penalize false credentials (10% penalty distributed to proposers/treasury)
+3. **Reputation** - Build reputation through honest participation (Bronze → Silver → Gold → Diamond)
+4. **Governance** - Community votes on credential disputes (24-hour voting periods)
+
+---
 
 ## Key Features
 
-### Creator Dashboard
+### 1. Privacy-First Credential System
 
-- Create and manage subscription tiers (e.g., Basic, Premium) with $MOCA payments
-- Set ZK-based access rules (e.g., "Requires Over 18 + Subscriber" or "Enclave NFT holder")
-- Configure location-based content restrictions (e.g., "Allow viewers from US, UK, Canada only")
-- Upload content (e.g., videos, NFTs) for gated access with geographic controls
-- View anonymized analytics (e.g., "10 users granted access to tier") without sensitive data
-- Manage $MOCA payouts (5% platform fee)
+**Zero-Knowledge Credentials:**
 
-### Fan Interface
+- Users prove claims without revealing raw data
+- Example: Prove "Twitter followers >1K" without sharing exact count or handle
+- zkTLS technology ensures cryptographic verification
+- No platform can access underlying personal information
 
-- Log in via Moca (Web3 SSO) for universal identity across creators
-- Pay $MOCA for subscriptions, receiving "Subscriber" credentials
-- Present ZK proofs (e.g., "Over 18 + Subscriber") to unlock content without data exposure
-- Opt-in to data monetization (e.g., share "gaming fan" proof for rewards)
+**Supported Credential Types:**
 
-### Anti-Fraud & Scalping Protection
+- 📱 **Social Profiles** - Twitter, Instagram, LinkedIn follower counts, engagement rates
+- ⚽ **Event Attendance** - Sports matches, concerts, conferences
+- 💰 **Wallet Activity** - DeFi transactions, NFT holdings, token balances
+- 🎓 **Professional** - Education, certifications, work experience
+- 🎮 **Gaming** - Achievements, playtime, spending habits
+- 🏆 **Custom** - Any verifiable data source
 
-- ZK credentials ensure only verified fans access content, preventing bots/scalpers
-- $MOCA staking for creators to promote tiers, slashed for rule violations (e.g., fake content)
+### 2. Decentralized Marketplace
 
-### Animoca Ecosystem Integration
+**Listing Features:**
+
+- Set custom prices in $MOCA
+- Choose visibility (public or private to specific companies)
+- Select pricing model (one-time access or subscription)
+- Configure access duration
+- Update credentials in real-time
+
+**Discovery Features:**
+
+- Browse by category (Social, Events, Wallet, Professional)
+- Filter by price range, vouch score, attributes
+- Search with advanced filters
+- Sort by relevance, price, trust score, recency
+
+**Purchase Flow:**
+
+- Companies pay in $MOCA
+- Instant ZK proof delivery
+- No personal data exposed
+- On-chain transaction record
+
+### 3. Trust & Reputation System
+
+**Vouching Mechanism:**
+
+- Stake minimum 3 $MOCA to vouch for credential
+- Build reputation through successful vouches
+- Earn rewards for quality endorsements
+- Higher reputation = greater voting weight
+
+**Slashing Protection:**
+
+- Community can propose slashing fake credentials
+- 24-hour voting period (>50% required)
+- 10% penalty from all vouchers if credential deemed false
+- 50% to proposer, 50% to community treasury
+
+**Reputation Tiers:**
+
+- 🥉 **Bronze (0-100 points)** - Base voting weight: 1, Min vouch: 3 $MOCA
+- 🥈 **Silver (101-500 points)** - Voting weight: 2, Min vouch: 2.5 $MOCA
+- 🥇 **Gold (501-1000 points)** - Voting weight: 3, Min vouch: 2 $MOCA
+- 💎 **Diamond (1000+ points)** - Voting weight: 4, Min vouch: 1.5 $MOCA, Council privileges
+
+### 4. User Dashboard
+
+**For Data Providers:**
+
+- View all credentials and their status
+- Track earnings and transaction history
+- See who purchased access
+- Manage active listings
+- Revoke access controls
+- Analytics (sales, revenue, popular credentials)
+
+**For Companies:**
+
+- Browse marketplace with filters
+- Purchase history and spending analytics
+- Campaign performance tracking
+- Credential portfolio management
+- Integration tools and APIs
+
+---
+
+## User Flows
+
+### User Flow 1: Creating and Listing First Credential
+
+1. **Login** - Connect Moca wallet (Web3 SSO)
+2. **Navigate** to "Issue Credential"
+3. **Select Type** - e.g., "Social Profile"
+4. **Authorize** data access (zkTLS)
+5. **Generate Proof** - System creates ZK credential
+6. **Set Price** - e.g., 2 $MOCA
+7. **Choose Visibility** - Public or private
+8. **List** - Credential goes live in marketplace
+9. **Track** - Monitor views and purchases
+
+### User Flow 2: Company Purchasing Credential
+
+1. **Browse Marketplace** - Filter by "Social Profiles"
+2. **View Details** - Check attributes, vouch score, price
+3. **Purchase** - Pay 2 $MOCA from wallet
+4. **Receive Proof** - Instant ZK proof delivery
+5. **Verify** - Use proof for targeting
+6. **Track ROI** - Monitor campaign performance
+
+### User Flow 3: Vouching for Quality
+
+1. **Browse Marketplace** - Find promising credential
+2. **Review Details** - Check attributes and issuer
+3. **Vouch** - Stake 3 $MOCA minimum
+4. **Build Reputation** - Earn points for successful vouches
+5. **Earn Rewards** - Potential future governance rewards
+
+### User Flow 4: Slashing Fraudulent Credential
+
+1. **Detect Fraud** - Notice suspicious credential
+2. **Propose Slash** - Pay 0.1 $MOCA proposal fee, provide evidence
+3. **Community Votes** - 24-hour voting period
+4. **Execute** - If >50% support, 10% slashed from vouchers
+5. **Receive Reward** - Proposer gets 50% of slashed amount
+
+---
+
+## Technical Architecture
+
+### Frontend Stack
+
+- **Framework:** SvelteKit 5 with TypeScript
+- **Styling:** TailwindCSS
+- **Icons:** Lucide Svelte
+- **State:** Svelte 5 Runes ($state, $derived, $effect)
+
+### Authentication
+
+- **Moca AIR Account Services** - Web3 SSO
+- **JWT Tokens** - Session management (ES256/RS256)
+- **Wallet Connection** - MetaMask, WalletConnect
+
+### Credentials
+
+- **Moca AIR Credential Services** - zkTLS-based issuance
+- **Zero-Knowledge Proofs** - Privacy-preserving verification
+- **zkTLS Oracle** - Data verification endpoint
+
+### Blockchain
+
+- **Network:** Moca Chain (EVM-compatible)
+- **Payment Token:** $MOCA
+- **Smart Contracts:**
+  - `CredentialContract.sol` - Credential storage & verification
+  - `MarketplaceContract.sol` - Listings & purchases
+  - `GovernanceContract.sol` - Vouching & slashing
+
+### Storage
+
+- **On-chain:** Credentials, transactions, reputation
+- **IPFS/Arweave:** Large files, metadata (optional)
+- **Database:** User sessions, analytics (PostgreSQL optional)
+
+---
+
+## Success Metrics
+
+### Phase 1 (Months 1-3): MVP Launch
+
+- **Users:** 1,000+ registered users
+- **Credentials:** 500+ credentials issued
+- **Marketplace Volume:** $10,000+ in transactions
+- **Vouchers:** 100+ active vouchers
+- **Companies:** 50+ companies onboarded
+
+### Phase 2 (Months 4-6): Growth
+
+- **Users:** 10,000+ registered users
+- **Credentials:** 5,000+ credentials issued
+- **Marketplace Volume:** $100,000+ in transactions
+- **Reputation:** 500+ users with Silver+ tier
+- **Integrations:** 5+ partner integrations
+
+### Phase 3 (Months 7-12): Scale
+
+- **Users:** 100,000+ registered users
+- **Credentials:** 50,000+ credentials issued
+- **Marketplace Volume:** $1M+ in transactions
+- **Ecosystem:** Listed on major DEXs
+- **Governance:** Active DAO participation
+
+### Key Performance Indicators (KPIs)
+
+- **User Acquisition Cost (UAC):** <$10 per user
+- **Credential Creation Rate:** Average 2+ credentials per user
+- **Marketplace Conversion:** >15% of browsers purchase
+- **Vouch Participation:** >20% of users vouch
+- **Platform Revenue:** $50K+ monthly (5% fees)
+- **Slash Rate:** <1% of credentials (quality control working)
+
+---
+
+## Competitive Advantage
+
+### vs. Traditional Data Brokers
+
+- ✅ Users get paid directly (not brokers)
+- ✅ Privacy-preserving (ZK proofs)
+- ✅ Users maintain control
+- ✅ Transparent pricing
+
+### vs. Centralized Platforms (Google, Facebook)
+
+- ✅ No data exploitation
+- ✅ Decentralized ownership
+- ✅ User-set pricing
+- ✅ Revocable access
+
+### vs. Other Web3 Data Projects
+
+- ✅ Built on Moca (700M+ user ecosystem)
+- ✅ zkTLS technology (superior privacy)
+- ✅ Trust system (vouching/slashing)
+- ✅ $MOCA utility (established token)
+- ✅ AIR Kit integration (easy adoption)
+
+---
+
+## Risks & Mitigation
+
+### Technical Risks
+
+- **Smart Contract Bugs:** → Comprehensive testing + security audit
+- **zkTLS Integration Issues:** → Close partnership with Moca team
+- **Scalability Concerns:** → Layer 2 solutions + optimization
+
+### Business Risks
+
+- **Low User Adoption:** → Marketing campaign + Animoca partnerships
+- **Fraud/Abuse:** → Slashing system + reputation tracking
+- **Regulatory Uncertainty:** → Legal consultation + compliance framework
+
+### Market Risks
+
+- **Competition:** → First-mover advantage + unique features
+- **Token Volatility:** → Stablecoin option + hedging strategies
+- **Bear Market:** → Focus on utility + sustainable growth
+
+---
+
+## Roadmap Summary
+
+- **Phase 1 (Weeks 1-4):** Foundation - Auth, Dashboard, Landing Page
+- **Phase 2 (Weeks 5-8):** Credentials - Issuance, Management, Verification ✅
+- **Phase 3 (Weeks 9-12):** Smart Contracts - Deploy & Integrate
+- **Phase 4 (Weeks 13-16):** Marketplace - Listing, Purchasing, Discovery
+- **Phase 5 (Weeks 17-20):** Trust System - Vouching, Slashing, Reputation
+- **Phase 6 (Weeks 21-24):** Polish - UI/UX, Testing, Optimization
+- **Phase 7 (Weeks 25-26):** Launch - Production Deployment
+
+**Total Timeline:** 26 weeks (~6 months)
+
+---
+
+## Appendix
+
+### Target Personas
+
+**Persona 1: Sarah - Social Media Influencer**
+
+- Has 50K Twitter followers, wants to monetize her influence
+- Privacy-conscious, doesn't want to share exact follower count
+- Lists "Twitter >10K" credential for 5 $MOCA
+- Earns $500/month from companies targeting influencers
+
+**Persona 2: TechCorp - Marketing Agency**
+
+- Needs verified gamers for new game launch campaign
+- Browses marketplace for "Gaming" credentials
+- Purchases 100 credentials at 3 $MOCA each
+- Achieves 20% conversion rate (vs. 2% with traditional ads)
+
+**Persona 3: Alex - Community Builder**
+
+- Active in Web3 community, attends conferences
+- Vouches for quality credentials to build reputation
+- Reaches Gold tier, reduces vouch cost to 2 $MOCA
+- Earns governance tokens and community respect
+
+### Pricing Strategy
+
+**User Credentials (Market-Driven):**
+
+- Social Profile (>1K followers): 1-2 $MOCA
+- Event Attendance (5+ events): 2-3 $MOCA
+- Wallet Activity (>$100 balance): 3-5 $MOCA
+- Professional Credentials: 5-10 $MOCA
+
+**Platform Fees:**
+
+- Marketplace: 5% per transaction
+- Vouch Minimum: 3 $MOCA
+- Slash Proposal: 0.1 $MOCA
+- Slash Penalty: 10% of staked amount
+
+**Revenue Model:**
+
+- 95% to data providers
+- 5% to platform treasury
+- Slash penalties: 50% proposer, 50% treasury
+
+---
+
+**Document Owner:** Product Team  
+**Next Review:** Monthly  
+**Feedback:** dev@enclave.app
 
 - Leverage OneFootball (200M users) for "verified fan" credentials (e.g., event attendance)
 - Tie to Enclave NFTs for loyalty perks (e.g., Realm Points for subscribers)
@@ -133,7 +476,7 @@ Use Moca Chain's chain-agnostic infrastructure for interoperability with Animoca
 
 1. **Onboarding:** Log in with Moca (SSO) using Web3 wallet
 2. **Credential Acquisition:**
-   - Request "Over 18" credential via implementing zkTLS API 
+   - Request "Over 18" credential via implementing zkTLS API
    - Pay $MOCA for subscription, receiving "Subscriber" credential
 3. **Content Access:** Browse creator tiers, present ZK proof (e.g., "Over 18 + Subscriber + Location") to unlock content (e.g., video)
 4. **Geographic Verification:** Prove location eligibility for region-restricted content using ZK location proofs
